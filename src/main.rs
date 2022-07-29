@@ -3,12 +3,19 @@ use std::fs::{self, DirEntry};
 use std::path::Path;
 use std::{error, fmt};
 use std::result;
+use std::f64::consts::PI;
+
+use opencv::prelude::HOGDescriptorTraitConst;
 use opencv::{
     core::*,
     Result,
-    prelude::*,
     imgcodecs,
     imgproc,
+    objdetect::{
+        HOGDescriptor,
+        HOGDescriptor_HistogramNormType,
+        HOGDescriptor_DEFAULT_NLEVELS,
+    },
     ml::prelude::*,
     ml::SVM,
 };
@@ -58,7 +65,7 @@ fn get_files(path_str: &str) -> result::Result<Vec<String>, ModelCreationError> 
     Ok(files)
 }
 
-fn create_svm_model(path_str: &str) -> Result<()> {
+fn compute_hog(path_str: &str, output: &mut Vec<Vector<f32>>) -> Result<()> {
     /* Get images' path from directory */
     let train_filenames = match get_files(path_str) {
         Ok(vec) => vec,
@@ -68,7 +75,7 @@ fn create_svm_model(path_str: &str) -> Result<()> {
     /* Processing images */
     for imgfile in train_filenames {
         /* Load images */
-        let img = imgcodecs::imread(&imgfile, imgcodecs::IMREAD_COLOR).unwrap();
+        let img = imgcodecs::imread(&imgfile, imgcodecs::IMREAD_COLOR)?;
 
         /* Grayscale */
         let mut gray_scale = Mat::default();
@@ -89,48 +96,34 @@ fn create_svm_model(path_str: &str) -> Result<()> {
             imgproc::INTER_LINEAR
         )?;
 
-        /* Apply sobel filter 
-         * to get edge image
-         */
-        let mut edge_x = Mat::default();
-        let mut edge_y = Mat::default();
-        imgproc::sobel(
-            &downscale,
-            &mut edge_x,
-            CV_32F,
+        let windows_sz = Size::new(64, 64);
+        let block_sz = Size::new(16, 16);
+        let block_str = Size::new(4, 4);
+        let cell_sz = Size::new(4, 4);
+        let nbins = 9;
+        let hog = HOGDescriptor::new(
+            windows_sz, 
+            block_sz, 
+            block_str, 
+            cell_sz,
+            nbins,
             1,
-            0,
-            3,
-            1.0,
-            0.0,
-            BORDER_DEFAULT
-        )?;
-        imgproc::sobel(
-            &downscale,
-            &mut edge_y,
-            CV_32F,
-            0,
-            1,
-            3,
-            1.0,
-            0.0,
-            BORDER_DEFAULT
-        )?;
-
-        /* Calc magnitude and angle of edge gradient */
-        let mut magnitude = Mat::default();
-        let mut angle = Mat::default();
-        cart_to_polar(
-            &edge_x,
-            &edge_y,
-            &mut magnitude,
-            &mut angle,
+            -1.0,
+            HOGDescriptor_HistogramNormType::L2Hys,
+            0.2,
+            false,
+            HOGDescriptor_DEFAULT_NLEVELS,
             false
-        )?;
-
-        /* Quantization */
-
-    } 
+        )?; 
+        let mut descriptor: Vector<f32> = Vector::new();
+        hog.compute(&downscale, 
+            &mut descriptor, 
+            Size::default(), 
+            Size::default(), 
+            &Vector::new()
+        )?;        
+        output.push(descriptor);
+    }
     Ok(())
 }
 
